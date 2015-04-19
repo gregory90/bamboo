@@ -18,13 +18,21 @@ It features:
 
 ### Compatibility
 
-Bamboo v0.1.1 supports Marathon 0.6 and Mesos 0.19.x
+v0.1.1 supports Marathon 0.6 and Mesos 0.19.x
 
-Bamboo v0.2.2 supports Marathon 0.7 (with [http_callback enabled](https://mesosphere.github.io/marathon/docs/rest-api.html#event-subscriptions)) and Mesos 0.20.x. Since v0.2.2, Bamboo supports both DNS and non-DNS proxy ACL rules.
+v0.2.2 supports both DNS and non-DNS proxy ACL rules
+
+v0.2.8 supports both HTTP & TCP via custom Marathon enviroment variables (read below for details)
+
+v0.2.9 supports Marathon 0.7.* (with [http_callback
+enabled](https://mesosphere.github.io/marathon/docs/rest-api.html#event-subscriptions)) and Mesos 0.21.x
+
+v0.2.11 improves API, deprecate previous API endpoint
+
 
 ### Releases and changelog
 
-Since Marathon API and behaviour may change over time, espeically in this early days. You should expect we aim to catch up those changes, improve design and adding new features. We aim to maintain backwards compatibility when possible. Releases and changelog are maintained in the [releases page](https://github.com/QubitProducts/bamboo/releases). Please read them when upgrading.
+Since Marathon API and behaviour may change over time, especially in this early days. You should expect we aim to catch up those changes, improve design and adding new features. We aim to maintain backwards compatibility when possible. Releases and changelog are maintained in the [releases page](https://github.com/QubitProducts/bamboo/releases). Please read them when upgrading.
 
 ## Deployment Guide
 
@@ -97,6 +105,28 @@ This section tries to explain usage in code comment style:
 }
 ```
 
+### Customize HAProxy Template with Marathon App Environment Variables
+
+Marathon app env variables are available to be called in the template.
+The default template shipped with Bamboo is aware of `BAMBOO_TCP_PORT`. When this variable is specified in Marathon app creation, the application will be configured with TCP mode. For example:
+
+```JavaScript
+{
+  "id": "FileServer",
+  "cmd": "python -m SimpleHTTPServer $PORT0",
+  "cpus": 0.1,
+  "mem": 90,
+  "ports": [0],
+  "instances": 2,
+  "env": {
+    "BAMBOO_TCP_PORT": "1080",
+    "MY_CUSTOM_ENV": "hello"
+  }
+}
+```
+
+In this example, both `BAMBOO_TCP_PORT` and `MY_CUSTOM_ENV` can be accessed in HAProxy template. This enables flexible template customization depending on your preferences.
+
 ### Environment Variables
 
 Configuration in the `production.json` file can be overridden with environment variables below. This is generally useful when you are building a Docker image for Bamboo and HAProxy. If they are not specified then the values from the configuration file will be used.
@@ -110,6 +140,10 @@ Environment Variable | Corresponds To
 `HAPROXY_TEMPLATE_PATH` | HAProxy.TemplatePath
 `HAPROXY_OUTPUT_PATH` | HAProxy.OutputPath
 `HAPROXY_RELOAD_CMD` | HAProxy.ReloadCommand
+`BAMBOO_DOCKER_AUTO_HOST` | Sets `BAMBOO_ENDPOINT=$HOST` when Bamboo container starts. Can be any value.
+`STATSD_ENABLED` | StatsD.Enabled
+`STATSD_PREFIX` | StatsD.Prefix
+`STATSD_HOST` | StatsD.Host
 
 
 ## REST APIs
@@ -125,27 +159,27 @@ curl -i http://localhost:8000/api/state
 
 #### POST /api/services
 
-Creates a service configuration for a Marathon application ID
+Creates a service configuration for a Marathon Application ID
 
 ```bash
-curl -i -X POST -d '{"id":"/app-1","acl":"hdr(host) -i app-1.example.com"}' http://localhost:8000/api/services
+curl -i -X POST -d '{"id":"/ExampleAppGroup/app1","acl":"hdr(host) -i app-1.example.com"}' http://localhost:8000/api/services
 ```
 
 #### PUT /api/services/:id
 
-Updates an existing service configuraiton for a Marathon application. `:id` is  URI encoded Marathon application ID
+Updates an existing service configuration for a Marathon application. `:id` is Marathon Application ID
 
 ```bash
-curl -i -X PUT -d '{"id":"/app-1", "acl":"path_beg -i /group/app-1"}' http://localhost:8000/api/services/%252Fapp-1
+curl -i -X PUT -d '{"id":"/ExampleAppGroup/app1", "acl":"path_beg -i /group/app-1"}' http://localhost:8000/api/services//ExampleAppGroup/app1
 ```
 
 
 #### DELETE /api/services/:id
 
-Deletes an existing service configuration. `:id` is  URI encoded Marathon application ID
+Deletes an existing service configuration. `:id` Marathon Application ID
 
 ```bash
-curl -i -X DELETE http://localhost:8000/api/services/%252Fapp-1
+curl -i -X DELETE http://localhost:8000/api/services//ExampleAppGroup/app1
 ```
 
 #### GET /status
@@ -180,6 +214,16 @@ The example deb package deploys:
 * Configuration and logs is under `/var/bamboo/`
 * Log file is rotated automatically
 
+In case you're not using upstart, a template init.d service is provided in [`init.d-bamboo-server`](https://github.com/QubitProducts/bamboo/blob/master/builder/init.d-bamboo-server). Install it with
+```
+sudo cp builder/init.d-bamboo-server /etc/init.d/bamboo-server
+sudo chown root:root /etc/init.d/bamboo-server
+sudo chmod 755 /etc/init.d/bamboo-server
+sudo update-rc.d "bamboo-server" defaults
+```
+
+You can then start the server with ```sudo service bamboo-server start```. Other commands: status, restart, stop
+
 ### As a Docker container
 
 There is a `Dockerfile` that will allow Bamboo to be built and run from within a Docker container.
@@ -204,6 +248,7 @@ docker run -t -i --rm -p 8000:8000 -p 80:80 \
     -e BAMBOO_ZK_PATH=/bamboo \
     -e BIND=":8000"
     -e CONFIG_PATH="config/production.example.json"
+    -e BAMBOO_DOCKER_AUTO_HOST=true
     bamboo
 ````
 
@@ -221,10 +266,10 @@ Golang:
 ```bash
 # Pakcage manager
 go get github.com/tools/godep
+# Testing Toolkit
 go get -t github.com/smartystreets/goconvey
 
-cd $GOPATH/github.com/QubitProducts/bamboo
-godep restore
+cd $GOPATH/src/github.com/QubitProducts/bamboo
 
 # Build your binary
 go build
