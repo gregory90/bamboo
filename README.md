@@ -89,7 +89,7 @@ This section tries to explain usage in code comment style:
   "HAProxy": {
     "TemplatePath": "/var/bamboo/haproxy_template.cfg",
     "OutputPath": "/etc/haproxy/haproxy.cfg",
-    "ReloadCommand": "read PIDS < /var/run/haproxy.pid; haproxy -f /etc/haproxy/haproxy.cfg -p /var/run/haproxy.pid -sf $PIDS && while ps -p $PIDS; do sleep 0.2; done"
+    "ReloadCommand": "haproxy -f /etc/haproxy/haproxy.cfg -p /var/run/haproxy.pid -D -sf $(cat /var/run/haproxy.pid)"
   },
   
   // Enable or disable StatsD event tracking
@@ -157,6 +157,29 @@ Shows the data structure used for rendering template
 curl -i http://localhost:8000/api/state
 ```
 
+#### GET /api/services
+
+Shows all service configurations
+
+```bash
+curl -i http://localhost:8000/api/services
+```
+
+Example result:
+
+```json
+{
+    "/authentication-service": {
+        "Id": "/authentication-service",
+        "Acl": "path_beg -i /authentication-service"
+    },
+    "/payment-service": {
+        "Id": "/payment-service",
+        "Acl": "path_beg -i /payment-service"
+    }
+}
+```
+
 #### POST /api/services
 
 Creates a service configuration for a Marathon Application ID
@@ -167,12 +190,13 @@ curl -i -X POST -d '{"id":"/ExampleAppGroup/app1","acl":"hdr(host) -i app-1.exam
 
 #### PUT /api/services/:id
 
-Updates an existing service configuration for a Marathon application. `:id` is Marathon Application ID
+Updates an existing or creates a new service configuration for a Marathon application. `:id` is the Marathon Application ID
 
 ```bash
 curl -i -X PUT -d '{"id":"/ExampleAppGroup/app1", "acl":"path_beg -i /group/app-1"}' http://localhost:8000/api/services//ExampleAppGroup/app1
 ```
 
+**Note**: Create semantics are available since version 0.2.11.
 
 #### DELETE /api/services/:id
 

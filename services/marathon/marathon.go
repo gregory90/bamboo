@@ -11,8 +11,19 @@ import (
 
 // Describes an app process running
 type Task struct {
-	Host string
-	Port int
+	Host  string
+	Port  int
+	Ports []int
+}
+
+// A health check on the application
+type HealthCheck struct {
+	// One of TCP, HTTP or COMMAND
+	Protocol string
+	// The path (if Protocol is HTTP)
+	Path string
+	// The position of the port targeted in the ports array
+	PortIndex int
 }
 
 // An app may have multiple processes
@@ -20,9 +31,12 @@ type App struct {
 	Id              string
 	EscapedId       string
 	HealthCheckPath string
+	HealthChecks    []HealthCheck
 	Tasks           []Task
 	ServicePort     int
+	ServicePorts    []int
 	Env             map[string]string
+	Labels          map[string]string
 }
 
 type AppList []App
@@ -39,13 +53,13 @@ func (slice AppList) Swap(i, j int) {
 	slice[i], slice[j] = slice[j], slice[i]
 }
 
-type MarathonTaskList []MarathonTask
+type marathonTaskList []marathonTask
 
-type MarathonTasks struct {
-	Tasks MarathonTaskList `json:tasks`
+type marathonTasks struct {
+	Tasks marathonTaskList `json:"tasks"`
 }
 
-type MarathonTask struct {
+type marathonTask struct {
 	AppId        string
 	Id           string
 	Host         string
@@ -56,109 +70,114 @@ type MarathonTask struct {
 	Version      string
 }
 
-func (slice MarathonTaskList) Len() int {
+func (slice marathonTaskList) Len() int {
 	return len(slice)
 }
 
-func (slice MarathonTaskList) Less(i, j int) bool {
+func (slice marathonTaskList) Less(i, j int) bool {
 	return slice[i].StagedAt < slice[j].StagedAt
 }
 
-func (slice MarathonTaskList) Swap(i, j int) {
+func (slice marathonTaskList) Swap(i, j int) {
 	slice[i], slice[j] = slice[j], slice[i]
 }
 
-type MarathonApps struct {
-	Apps []MarathonApp `json:apps`
+type marathonApps struct {
+	Apps []marathonApp `json:"apps"`
 }
 
-type MarathonApp struct {
-	Id           string            `json:id`
-	HealthChecks []HealthChecks    `json:healthChecks`
-	Ports        []int             `json:ports`
-	Env          map[string]string `json:env`
+type marathonApp struct {
+	Id           string                `json:"id"`
+	HealthChecks []marathonHealthCheck `json:"healthChecks"`
+	Ports        []int                 `json:"ports"`
+	Env          map[string]string     `json:"env"`
+	Labels       map[string]string     `json:"labels"`
 }
 
-type HealthChecks struct {
-	Path string `json:path`
+type marathonHealthCheck struct {
+	Path      string `json:"path"`
+	Protocol  string `json:"protocol"`
+	PortIndex int    `json:"portIndex"`
 }
 
-func fetchMarathonApps(endpoint string) (map[string]MarathonApp, error) {
+func fetchMarathonApps(endpoint string) (map[string]marathonApp, error) {
 	response, err := http.Get(endpoint + "/v2/apps")
 
 	if err != nil {
 		return nil, err
-	} else {
-		defer response.Body.Close()
-		var appResponse MarathonApps
-
-		contents, err := ioutil.ReadAll(response.Body)
-		if err != nil {
-			return nil, err
-		}
-
-		err = json.Unmarshal(contents, &appResponse)
-		if err != nil {
-			return nil, err
-		}
-
-		dataById := map[string]MarathonApp{}
-
-		for _, appConfig := range appResponse.Apps {
-			dataById[appConfig.Id] = appConfig
-		}
-
-		return dataById, nil
 	}
+
+	defer response.Body.Close()
+	var appResponse marathonApps
+
+	contents, err := ioutil.ReadAll(response.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	err = json.Unmarshal(contents, &appResponse)
+	if err != nil {
+		return nil, err
+	}
+
+	dataById := map[string]marathonApp{}
+
+	for _, appConfig := range appResponse.Apps {
+		dataById[appConfig.Id] = appConfig
+	}
+
+	return dataById, nil
 }
 
-func fetchTasks(endpoint string) (map[string][]MarathonTask, error) {
+func fetchTasks(endpoint string) (map[string][]marathonTask, error) {
 	client := &http.Client{}
 	req, err := http.NewRequest("GET", endpoint+"/v2/tasks", nil)
 	req.Header.Add("Accept", "application/json")
 	response, err := client.Do(req)
 
-	var tasks MarathonTasks
+	var tasks marathonTasks
 
 	if err != nil {
 		return nil, err
-	} else {
-		contents, err := ioutil.ReadAll(response.Body)
-		defer response.Body.Close()
-		if err != nil {
-			return nil, err
-		}
-
-		err = json.Unmarshal(contents, &tasks)
-		if err != nil {
-			return nil, err
-		}
-
-		taskList := tasks.Tasks
-		sort.Sort(taskList)
-
-		tasksById := map[string][]MarathonTask{}
-		for _, task := range taskList {
-			if tasksById[task.AppId] == nil {
-				tasksById[task.AppId] = []MarathonTask{}
-			}
-			tasksById[task.AppId] = append(tasksById[task.AppId], task)
-		}
-
-		return tasksById, nil
 	}
+
+	contents, err := ioutil.ReadAll(response.Body)
+	defer response.Body.Close()
+	if err != nil {
+		return nil, err
+	}
+
+	err = json.Unmarshal(contents, &tasks)
+	if err != nil {
+		return nil, err
+	}
+
+	taskList := tasks.Tasks
+	sort.Sort(taskList)
+
+	tasksById := map[string][]marathonTask{}
+	for _, task := range taskList {
+		if tasksById[task.AppId] == nil {
+			tasksById[task.AppId] = []marathonTask{}
+		}
+		tasksById[task.AppId] = append(tasksById[task.AppId], task)
+	}
+
+	return tasksById, nil
 }
 
-func createApps(tasksById map[string][]MarathonTask, marathonApps map[string]MarathonApp) AppList {
+func createApps(tasksById map[string][]marathonTask, marathonApps map[string]marathonApp) AppList {
 
 	apps := AppList{}
 
 	for appId, tasks := range tasksById {
+		marathonApp := marathonApps[appId]
+
 		simpleTasks := []Task{}
 
 		for _, task := range tasks {
 			if len(task.Ports) > 0 {
-				simpleTasks = append(simpleTasks, Task{Host: task.Host, Port: task.Ports[0]})
+				simpleTasks = append(simpleTasks, Task{Host: task.Host, Port: task.Ports[0], Ports: task.Ports})
 			}
 		}
 
@@ -174,12 +193,24 @@ func createApps(tasksById map[string][]MarathonTask, marathonApps map[string]Mar
 			// Used for template
 			EscapedId:       strings.Replace(appId, "/", "::", -1),
 			Tasks:           simpleTasks,
-			HealthCheckPath: parseHealthCheckPath(marathonApps[appId].HealthChecks),
+			HealthCheckPath: parseHealthCheckPath(marathonApp.HealthChecks),
 			Env:             marathonApps[appId].Env,
+			Labels:          marathonApps[appId].Labels,
+		}
+
+		app.HealthChecks = make([]HealthCheck, 0, len(marathonApp.HealthChecks))
+		for _, marathonCheck := range marathonApp.HealthChecks {
+			check := HealthCheck{
+				Protocol:  marathonCheck.Protocol,
+				Path:      marathonCheck.Path,
+				PortIndex: marathonCheck.PortIndex,
+			}
+			app.HealthChecks = append(app.HealthChecks, check)
 		}
 
 		if len(marathonApps[appId].Ports) > 0 {
 			app.ServicePort = marathonApps[appId].Ports[0]
+			app.ServicePorts = marathonApps[appId].Ports
 		}
 
 		apps = append(apps, app)
@@ -187,9 +218,12 @@ func createApps(tasksById map[string][]MarathonTask, marathonApps map[string]Mar
 	return apps
 }
 
-func parseHealthCheckPath(checks []HealthChecks) string {
-	if len(checks) > 0 {
-		return checks[0].Path
+func parseHealthCheckPath(checks []marathonHealthCheck) string {
+	for _, check := range checks {
+		if check.Protocol != "HTTP" {
+			continue
+		}
+		return check.Path
 	}
 	return ""
 }
