@@ -30,6 +30,6 @@ RUN apt-get clean && \
     rm -f /etc/dpkg/dpkg.cfg.d/02apt-speedup && \
     rm -f /etc/ssh/ssh_host_*
 
-EXPOSE 80 8000
+EXPOSE 80 443 8000
 
 CMD /run.sh
