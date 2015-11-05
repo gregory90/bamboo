@@ -22,7 +22,7 @@ RUN go get github.com/tools/godep && \
     mkdir -p /run/haproxy && \
     mkdir -p /var/log/supervisor
 
-ADD config/401.http /etc/haproxy/errors/401.http
+ADD config/errors /etc/haproxy
 VOLUME /var/log/supervisor
 
 RUN apt-get clean && \
